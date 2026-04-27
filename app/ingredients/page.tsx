@@ -1,34 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { supabase } from "@/lib/supabase";
 
-const allIngredients = [
-  "달걀",
-  "감자",
-  "양파",
-  "두부",
-  "당근",
-  "애호박",
-  "올리브오일",
-  "소금",
-  "브로콜리",
-  "현미",
-  "들기름",
-  "버섯",
-  "단호박",
-  "고구마",
-  "양배추",
-  "사과",
-  "바나나",
-  "오트밀",
-  "귀리",
-  "아보카도",
-  "토마토",
-  "오이",
-  "두유",
-  "레몬",
-];
+type Ingredient = {
+  id: number;
+  name: string;
+};
 
 const featuredIngredients = [
   "달걀",
@@ -42,9 +21,32 @@ const featuredIngredients = [
 ];
 
 export default function IngredientsPage() {
+  const [ingredients, setIngredients] = useState<string[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
   const [query, setQuery] = useState("");
   const router = useRouter();
+
+  useEffect(() => {
+    const fetchIngredients = async () => {
+      const { data, error } = await supabase
+        .from("ingredients")
+        .select("*")
+        .order("name", { ascending: true });
+
+      if (error) {
+        alert(`재료 불러오기 실패: ${error.message}`);
+        return;
+      }
+
+      const names = ((data || []) as Ingredient[])
+        .map((item) => item.name)
+        .filter(Boolean);
+
+      setIngredients(Array.from(new Set([...featuredIngredients, ...names])));
+    };
+
+    fetchIngredients();
+  }, []);
 
   const toggle = (item: string) => {
     setSelected((prev) =>
@@ -61,12 +63,13 @@ export default function IngredientsPage() {
   const filteredIngredients = useMemo(() => {
     const q = query.trim();
     if (!q) return [];
-    return allIngredients.filter((item) => item.includes(q));
-  }, [query]);
+
+    return ingredients.filter((item) => item.includes(q)).slice(0, 20);
+  }, [query, ingredients]);
 
   const handleSubmit = () => {
     const queryString = selected.join(",");
-    router.push(`/results?ingredients=${queryString}`);
+    router.push(`/results?ingredients=${encodeURIComponent(queryString)}`);
   };
 
   return (
@@ -79,18 +82,16 @@ export default function IngredientsPage() {
           자주 쓰는 재료를 누르거나 검색해서 추가하세요
         </p>
 
-        {/* 검색창 */}
         <div className="mt-6">
           <input
             type="text"
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder="재료 검색하기"
-            className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-4 text-lg text-neutral-900 outline-none placeholder:text-neutral-400 shadow-sm"
+            className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-4 text-lg text-neutral-900 shadow-sm outline-none placeholder:text-neutral-400"
           />
         </div>
 
-        {/* 검색 결과 */}
         {query.trim() && (
           <div className="mt-3 rounded-2xl bg-white p-3 shadow-sm">
             {filteredIngredients.length > 0 ? (
@@ -120,7 +121,6 @@ export default function IngredientsPage() {
           </div>
         )}
 
-        {/* 자주 쓰는 재료 */}
         <section className="mt-6">
           <h2 className="text-lg font-bold text-neutral-900">자주 쓰는 재료</h2>
 
@@ -155,7 +155,6 @@ export default function IngredientsPage() {
           </div>
         </section>
 
-        {/* 선택한 재료 */}
         <section className="mt-6">
           <h2 className="text-lg font-bold text-neutral-900">선택한 재료</h2>
 
@@ -181,7 +180,6 @@ export default function IngredientsPage() {
           </div>
         </section>
 
-        {/* 버튼 */}
         <div className="mt-6 flex justify-center">
           <button
             type="button"
