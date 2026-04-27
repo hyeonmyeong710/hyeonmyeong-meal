@@ -16,6 +16,8 @@ type Recipe = {
 type RecipeWithMatch = Recipe & {
   missingCount: number;
   missingItems: string[];
+  matchedCount: number;
+  matchedItems: string[];
 };
 
 const ingredientMap: Record<string, string> = {
@@ -88,15 +90,32 @@ function ResultsContent() {
       (item) => !normalizedSelected.includes(normalize(item))
     );
 
+    const matched = required.filter((item) =>
+      normalizedSelected.includes(normalize(item))
+    );
+
     return {
       ...recipe,
       missingCount: missing.length,
       missingItems: missing,
+      matchedCount: matched.length,
+      matchedItems: matched,
     };
   });
 
-  const possible = results.filter((r) => r.missingCount === 0);
-  const almost = results.filter((r) => r.missingCount === 1);
+  const possible = results
+    .filter((recipe) => recipe.required_ingredients.length > 0 && recipe.missingCount === 0)
+    .sort((a, b) => b.matchedCount - a.matchedCount);
+
+  const almost = results
+    .filter((recipe) => recipe.missingCount > 0 && recipe.matchedCount > 0)
+    .sort((a, b) => {
+      if (a.missingCount !== b.missingCount) {
+        return a.missingCount - b.missingCount;
+      }
+
+      return b.matchedCount - a.matchedCount;
+    });
 
   return (
     <main className="min-h-screen bg-neutral-100 px-5 py-8">
@@ -142,6 +161,12 @@ function ResultsContent() {
                     {recipe.description || "설명이 없습니다."}
                   </p>
 
+                  {recipe.matchedItems.length > 0 && (
+                    <p className="mt-4 text-sm font-semibold text-neutral-500">
+                      사용 가능 재료: {recipe.matchedItems.join(", ")}
+                    </p>
+                  )}
+
                   <Link
                     href={`/recipes/${recipe.id}`}
                     className="mt-4 block w-full rounded-2xl bg-black py-3 text-center font-bold text-white"
@@ -178,7 +203,17 @@ function ResultsContent() {
                     {recipe.title}
                   </h3>
 
-                  <p className="mt-4 text-lg font-bold text-red-600">
+                  <p className="mt-3 text-base text-neutral-600">
+                    {recipe.description || "설명이 없습니다."}
+                  </p>
+
+                  {recipe.matchedItems.length > 0 && (
+                    <p className="mt-4 text-sm font-semibold text-neutral-500">
+                      있는 재료: {recipe.matchedItems.join(", ")}
+                    </p>
+                  )}
+
+                  <p className="mt-2 text-lg font-bold text-red-600">
                     부족한 재료: {recipe.missingItems.join(", ")}
                   </p>
 
