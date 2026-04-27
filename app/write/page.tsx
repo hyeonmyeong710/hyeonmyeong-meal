@@ -49,18 +49,16 @@ function WriteContent() {
     checkLogin();
   }, [router]);
 
+  const fetchIngredients = async () => {
+    const { data } = await supabase
+      .from("ingredients")
+      .select("*")
+      .order("name", { ascending: true });
+
+    setIngredients((data || []) as Ingredient[]);
+  };
+
   useEffect(() => {
-    const fetchIngredients = async () => {
-      const { data, error } = await supabase
-        .from("ingredients")
-        .select("*")
-        .order("name", { ascending: true });
-
-      if (!error && data) {
-        setIngredients(data as Ingredient[]);
-      }
-    };
-
     fetchIngredients();
   }, []);
 
@@ -81,10 +79,18 @@ function WriteContent() {
 
       setTitle(data.title || "");
       setDescription(data.description || "");
-      setRequiredIngredients(data.required_ingredients?.length ? data.required_ingredients : [""]);
-      setOptionalIngredients(data.optional_ingredients?.length ? data.optional_ingredients : [""]);
+      setRequiredIngredients(
+        data.required_ingredients?.length ? data.required_ingredients : [""]
+      );
+      setOptionalIngredients(
+        data.optional_ingredients?.length ? data.optional_ingredients : [""]
+      );
       setSteps(data.steps?.length ? data.steps : [""]);
-      setPurchaseLinks(data.purchase_links?.length ? data.purchase_links : [{ ingredient: "", url: "" }]);
+      setPurchaseLinks(
+        data.purchase_links?.length
+          ? data.purchase_links
+          : [{ ingredient: "", url: "" }]
+      );
       setReferences(data.references?.length ? data.references : [""]);
       setImageUrl(data.image_url || null);
     };
@@ -97,6 +103,18 @@ function WriteContent() {
 
   const cleanPurchaseLinks = (list: PurchaseLink[]) =>
     list.filter((item) => item.ingredient.trim() && item.url.trim());
+
+  const saveNewIngredients = async (items: string[]) => {
+    const cleaned = Array.from(new Set(cleanList(items)));
+
+    for (const name of cleaned) {
+      const exists = ingredients.some((item) => item.name === name);
+
+      if (!exists) {
+        await supabase.from("ingredients").insert({ name });
+      }
+    }
+  };
 
   const updateListItem = (
     setter: React.Dispatch<React.SetStateAction<string[]>>,
@@ -141,13 +159,23 @@ function WriteContent() {
       return;
     }
 
+    const required = cleanList(requiredIngredients);
+    const optional = cleanList(optionalIngredients);
+    const purchaseIngredientNames = purchaseLinks.map((item) => item.ingredient);
+
+    await saveNewIngredients([
+      ...required,
+      ...optional,
+      ...purchaseIngredientNames,
+    ]);
+
     const uploadedImageUrl = await uploadImage();
 
     const payload = {
       title: title.trim(),
       description: description.trim(),
-      required_ingredients: cleanList(requiredIngredients),
-      optional_ingredients: cleanList(optionalIngredients),
+      required_ingredients: required,
+      optional_ingredients: optional,
       steps: cleanList(steps),
       purchase_links: cleanPurchaseLinks(purchaseLinks),
       references: cleanList(references),
@@ -165,6 +193,49 @@ function WriteContent() {
 
     alert(editId ? "수정 완료" : "저장 완료");
     router.push("/manage");
+  };
+
+  const IngredientInput = ({
+    value,
+    onChange,
+    placeholder,
+  }: {
+    value: string;
+    onChange: (value: string) => void;
+    placeholder: string;
+  }) => {
+    const suggestions =
+      value.trim().length > 0
+        ? ingredients
+            .filter((item) => item.name.includes(value.trim()))
+            .slice(0, 5)
+        : [];
+
+    return (
+      <div className="relative w-full">
+        <input
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={placeholder}
+          className="w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
+        />
+
+        {suggestions.length > 0 && (
+          <div className="absolute z-10 mt-2 w-full rounded-2xl border border-neutral-200 bg-white p-2 shadow">
+            {suggestions.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => onChange(item.name)}
+                className="block w-full rounded-xl px-3 py-2 text-left hover:bg-neutral-100"
+              >
+                {item.name}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+    );
   };
 
   if (loading) {
@@ -223,20 +294,13 @@ function WriteContent() {
 
           {requiredIngredients.map((item, index) => (
             <div key={index} className="flex gap-2">
-              <select
+              <IngredientInput
                 value={item}
-                onChange={(e) =>
-                  updateListItem(setRequiredIngredients, index, e.target.value)
+                onChange={(value) =>
+                  updateListItem(setRequiredIngredients, index, value)
                 }
-                className="w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
-              >
-                <option value="">재료를 선택하세요</option>
-                {ingredients.map((ingredient) => (
-                  <option key={ingredient.id} value={ingredient.name}>
-                    {ingredient.name}
-                  </option>
-                ))}
-              </select>
+                placeholder="예: 오트밀"
+              />
 
               <button
                 type="button"
@@ -262,20 +326,13 @@ function WriteContent() {
 
           {optionalIngredients.map((item, index) => (
             <div key={index} className="flex gap-2">
-              <select
+              <IngredientInput
                 value={item}
-                onChange={(e) =>
-                  updateListItem(setOptionalIngredients, index, e.target.value)
+                onChange={(value) =>
+                  updateListItem(setOptionalIngredients, index, value)
                 }
-                className="w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
-              >
-                <option value="">재료를 선택하세요</option>
-                {ingredients.map((ingredient) => (
-                  <option key={ingredient.id} value={ingredient.name}>
-                    {ingredient.name}
-                  </option>
-                ))}
-              </select>
+                placeholder="예: 바나나"
+              />
 
               <button
                 type="button"
@@ -331,25 +388,21 @@ function WriteContent() {
           <h2 className="text-xl font-bold">구매 연결 재료</h2>
 
           {purchaseLinks.map((item, index) => (
-            <div key={index} className="space-y-2 rounded-2xl border border-neutral-200 p-3">
-              <select
+            <div
+              key={index}
+              className="space-y-2 rounded-2xl border border-neutral-200 p-3"
+            >
+              <IngredientInput
                 value={item.ingredient}
-                onChange={(e) =>
+                onChange={(value) =>
                   setPurchaseLinks((prev) =>
                     prev.map((link, i) =>
-                      i === index ? { ...link, ingredient: e.target.value } : link
+                      i === index ? { ...link, ingredient: value } : link
                     )
                   )
                 }
-                className="w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
-              >
-                <option value="">재료를 선택하세요</option>
-                {ingredients.map((ingredient) => (
-                  <option key={ingredient.id} value={ingredient.name}>
-                    {ingredient.name}
-                  </option>
-                ))}
-              </select>
+                placeholder="예: 오트밀"
+              />
 
               <input
                 value={item.url}
