@@ -226,7 +226,7 @@ function WriteContent() {
           className="w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
         />
 
-        {suggestions.length > 0 && (
+        {suggestions.length > 0 && value.length > 1 &&(
           <div className="absolute z-10 mt-2 w-full rounded-2xl border border-neutral-200 bg-white p-2 shadow">
             {suggestions.map((item) => (
               <button
