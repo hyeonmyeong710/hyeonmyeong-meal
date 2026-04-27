@@ -1,37 +1,29 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { Dispatch, SetStateAction } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+
+type Ingredient = {
+  id: number;
+  name: string;
+};
 
 type PurchaseLink = {
   ingredient: string;
   url: string;
 };
 
-type RecipeRow = {
-  id: number;
-  title: string;
-  description: string;
-  image_url: string | null;
-  required_ingredients: string[];
-  optional_ingredients: string[];
-  steps: string[];
-  purchase_links: PurchaseLink[];
-  references: string[];
-};
-
-export default function WritePage() {
+function WriteContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editId = searchParams.get("id");
 
+  const [loading, setLoading] = useState(true);
+  const [ingredients, setIngredients] = useState<Ingredient[]>([]);
+
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
-  const [imageUrl, setImageUrl] = useState("");
-  const [imageFile, setImageFile] = useState<File | null>(null);
-
   const [requiredIngredients, setRequiredIngredients] = useState<string[]>([""]);
   const [optionalIngredients, setOptionalIngredients] = useState<string[]>([""]);
   const [steps, setSteps] = useState<string[]>([""]);
@@ -39,182 +31,164 @@ export default function WritePage() {
     { ingredient: "", url: "" },
   ]);
   const [references, setReferences] = useState<string[]>([""]);
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
 
   useEffect(() => {
-    const loadRecipe = async () => {
-      if (!editId) return;
+    const checkLogin = async () => {
+      const { data } = await supabase.auth.getUser();
 
-      const { data, error } = await supabase
-        .from("recipes")
-        .select("*")
-        .eq("id", Number(editId))
-        .single();
-
-      if (error || !data) {
-        alert("수정할 레시피를 불러오지 못했습니다.");
+      if (!data.user) {
+        router.push("/login");
         return;
       }
 
-      const recipe = data as RecipeRow;
-
-      setTitle(recipe.title || "");
-      setDescription(recipe.description || "");
-      setImageUrl(recipe.image_url || "");
-      setRequiredIngredients(
-        recipe.required_ingredients?.length ? recipe.required_ingredients : [""]
-      );
-      setOptionalIngredients(
-        recipe.optional_ingredients?.length ? recipe.optional_ingredients : [""]
-      );
-      setSteps(recipe.steps?.length ? recipe.steps : [""]);
-      setPurchaseLinks(
-        recipe.purchase_links?.length
-          ? recipe.purchase_links
-          : [{ ingredient: "", url: "" }]
-      );
-      setReferences(recipe.references?.length ? recipe.references : [""]);
+      setLoading(false);
     };
 
-    loadRecipe();
+    checkLogin();
+  }, [router]);
+
+  useEffect(() => {
+    const fetchIngredients = async () => {
+      const { data, error } = await supabase
+        .from("ingredients")
+        .select("*")
+        .order("name", { ascending: true });
+
+      if (!error && data) {
+        setIngredients(data as Ingredient[]);
+      }
+    };
+
+    fetchIngredients();
+  }, []);
+
+  useEffect(() => {
+    if (!editId) return;
+
+    const fetchRecipe = async () => {
+      const { data, error } = await supabase
+        .from("recipes")
+        .select("*")
+        .eq("id", editId)
+        .single();
+
+      if (error) {
+        alert(`레시피 불러오기 실패: ${error.message}`);
+        return;
+      }
+
+      setTitle(data.title || "");
+      setDescription(data.description || "");
+      setRequiredIngredients(data.required_ingredients?.length ? data.required_ingredients : [""]);
+      setOptionalIngredients(data.optional_ingredients?.length ? data.optional_ingredients : [""]);
+      setSteps(data.steps?.length ? data.steps : [""]);
+      setPurchaseLinks(data.purchase_links?.length ? data.purchase_links : [{ ingredient: "", url: "" }]);
+      setReferences(data.references?.length ? data.references : [""]);
+      setImageUrl(data.image_url || null);
+    };
+
+    fetchRecipe();
   }, [editId]);
 
-  const allIngredientOptions = useMemo(() => {
-    const merged = [...requiredIngredients, ...optionalIngredients]
-      .map((item) => item.trim())
-      .filter(Boolean);
+  const cleanList = (list: string[]) =>
+    list.map((item) => item.trim()).filter(Boolean);
 
-    return Array.from(new Set(merged));
-  }, [requiredIngredients, optionalIngredients]);
+  const cleanPurchaseLinks = (list: PurchaseLink[]) =>
+    list.filter((item) => item.ingredient.trim() && item.url.trim());
 
   const updateListItem = (
-    setter: Dispatch<SetStateAction<string[]>>,
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
     index: number,
     value: string
   ) => {
     setter((prev) => prev.map((item, i) => (i === index ? value : item)));
   };
 
-  const addListItem = (setter: Dispatch<SetStateAction<string[]>>) => {
-    setter((prev) => [...prev, ""]);
-  };
-
   const removeListItem = (
-    setter: Dispatch<SetStateAction<string[]>>,
+    setter: React.Dispatch<React.SetStateAction<string[]>>,
     index: number
   ) => {
-    setter((prev) => {
-      if (prev.length === 1) return [""];
-      return prev.filter((_, i) => i !== index);
-    });
+    setter((prev) => prev.filter((_, i) => i !== index));
   };
 
-  const updatePurchaseLink = (
-    index: number,
-    field: keyof PurchaseLink,
-    value: string
-  ) => {
-    setPurchaseLinks((prev) =>
-      prev.map((item, i) => (i === index ? { ...item, [field]: value } : item))
-    );
-  };
+  const uploadImage = async () => {
+    if (!imageFile) return imageUrl;
 
-  const addPurchaseLink = () => {
-    setPurchaseLinks((prev) => [...prev, { ingredient: "", url: "" }]);
-  };
+    const fileExt = imageFile.name.split(".").pop();
+    const fileName = `public/${Date.now()}.${fileExt}`;
 
-  const removePurchaseLink = (index: number) => {
-    setPurchaseLinks((prev) => {
-      if (prev.length === 1) return [{ ingredient: "", url: "" }];
-      return prev.filter((_, i) => i !== index);
-    });
+    const { error } = await supabase.storage
+      .from("recipe-images")
+      .upload(fileName, imageFile);
+
+    if (error) {
+      alert(`이미지 업로드 실패: ${error.message}`);
+      return null;
+    }
+
+    const { data } = supabase.storage
+      .from("recipe-images")
+      .getPublicUrl(fileName);
+
+    return data.publicUrl;
   };
 
   const handleSave = async () => {
     if (!title.trim()) {
-      alert("레시피 이름을 입력해주세요.");
+      alert("레시피 이름을 입력하세요");
       return;
     }
 
-    let finalImageUrl = imageUrl;
+    const uploadedImageUrl = await uploadImage();
 
-    if (imageFile) {
-      const fileExt = imageFile.name.split(".").pop();
-      const fileName = `${Date.now()}.${fileExt}`;
-
-      const { error: uploadError } = await supabase.storage
-        .from("recipe-images")
-        .upload(fileName, imageFile);
-
-      if (uploadError) {
-        alert(`이미지 업로드 실패: ${uploadError.message}`);
-        return;
-      }
-
-      const { data } = supabase.storage
-        .from("recipe-images")
-        .getPublicUrl(fileName);
-
-      finalImageUrl = data.publicUrl;
-    }
-
-    const recipe = {
+    const payload = {
       title: title.trim(),
       description: description.trim(),
-      image_url: finalImageUrl,
-      required_ingredients: requiredIngredients.map((v) => v.trim()).filter(Boolean),
-      optional_ingredients: optionalIngredients.map((v) => v.trim()).filter(Boolean),
-      steps: steps.map((v) => v.trim()).filter(Boolean),
-      purchase_links: purchaseLinks.filter(
-        (item) => item.ingredient.trim() || item.url.trim()
-      ),
-      references: references.map((v) => v.trim()).filter(Boolean),
+      required_ingredients: cleanList(requiredIngredients),
+      optional_ingredients: cleanList(optionalIngredients),
+      steps: cleanList(steps),
+      purchase_links: cleanPurchaseLinks(purchaseLinks),
+      references: cleanList(references),
+      image_url: uploadedImageUrl,
     };
 
-    if (editId) {
-      const { error } = await supabase
-        .from("recipes")
-        .update(recipe)
-        .eq("id", Number(editId));
-
-      if (error) {
-        alert(`수정 실패: ${error.message}`);
-        return;
-      }
-
-      alert("수정 완료!");
-      router.push(`/recipes/${editId}`);
-      return;
-    }
-
-    const { error } = await supabase.from("recipes").insert([recipe]);
+    const { error } = editId
+      ? await supabase.from("recipes").update(payload).eq("id", editId)
+      : await supabase.from("recipes").insert(payload);
 
     if (error) {
       alert(`저장 실패: ${error.message}`);
       return;
     }
 
-    alert("저장 완료!");
+    alert(editId ? "수정 완료" : "저장 완료");
     router.push("/manage");
   };
 
+  if (loading) {
+    return (
+      <main className="min-h-screen bg-neutral-100 px-5 py-8">
+        <div className="mx-auto max-w-md">
+          <p>확인 중...</p>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-neutral-50 px-6 py-8">
+    <main className="min-h-screen bg-neutral-100 px-5 py-8">
       <div className="mx-auto max-w-md space-y-6">
         <section>
           <p className="text-sm text-neutral-500">현명한 한끼</p>
-          <h1 className="mt-2 text-3xl font-bold text-neutral-900">
+          <h1 className="mt-2 text-3xl font-bold text-black">
             {editId ? "레시피 수정" : "레시피 작성"}
           </h1>
-          <p className="mt-2 text-sm text-neutral-500">
-            재료와 만드는 방법을 하나씩 추가하세요
-          </p>
         </section>
 
         <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm">
-          <h2 className="text-xl font-semibold text-neutral-900">기본 정보</h2>
-
           <input
-            type="text"
             value={title}
             onChange={(e) => setTitle(e.target.value)}
             placeholder="레시피 이름"
@@ -224,219 +198,252 @@ export default function WritePage() {
           <textarea
             value={description}
             onChange={(e) => setDescription(e.target.value)}
-            placeholder="레시피 설명"
-            className="min-h-[120px] w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
+            placeholder="간단 설명"
+            className="h-28 w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
           />
 
-          <div className="space-y-3">
-            <label className="text-sm font-semibold text-neutral-700">
-              완성된 요리 사진
-            </label>
+          <input
+            type="file"
+            accept="image/*"
+            onChange={(e) => setImageFile(e.target.files?.[0] || null)}
+            className="w-full rounded-2xl border border-neutral-200 px-4 py-4"
+          />
 
-            {imageUrl && !imageFile && (
-              <img
-                src={imageUrl}
-                alt="레시피 사진"
-                className="h-48 w-full rounded-2xl object-cover"
-              />
-            )}
-
-            {imageFile && (
-              <div className="rounded-2xl bg-neutral-100 px-4 py-4 text-sm font-semibold text-neutral-700">
-                선택한 사진: {imageFile.name}
-              </div>
-            )}
-
-            <input
-              type="file"
-              accept="image/*"
-              onChange={(e) => {
-                if (e.target.files?.[0]) {
-                  setImageFile(e.target.files[0]);
-                }
-              }}
-              className="w-full rounded-2xl border border-neutral-200 bg-white px-4 py-4 text-sm"
+          {imageUrl && (
+            <img
+              src={imageUrl}
+              alt="레시피 이미지"
+              className="h-48 w-full rounded-2xl object-cover"
             />
-          </div>
+          )}
         </section>
 
-        <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold">필수 재료</h2>
-            <button
-              type="button"
-              onClick={() => addListItem(setRequiredIngredients)}
-              className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white"
-            >
-              추가하기
-            </button>
-          </div>
+        <section className="space-y-3 rounded-3xl bg-white p-5 shadow-sm">
+          <h2 className="text-xl font-bold">필수 재료</h2>
 
           {requiredIngredients.map((item, index) => (
             <div key={index} className="flex gap-2">
-              <input
+              <select
                 value={item}
                 onChange={(e) =>
                   updateListItem(setRequiredIngredients, index, e.target.value)
                 }
-                placeholder={`필수 재료 ${index + 1}`}
                 className="w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
-              />
+              >
+                <option value="">재료를 선택하세요</option>
+                {ingredients.map((ingredient) => (
+                  <option key={ingredient.id} value={ingredient.name}>
+                    {ingredient.name}
+                  </option>
+                ))}
+              </select>
+
               <button
                 type="button"
                 onClick={() => removeListItem(setRequiredIngredients, index)}
-                className="rounded-2xl border px-4 text-sm font-semibold"
+                className="rounded-2xl border border-neutral-200 px-4"
               >
                 삭제
               </button>
             </div>
           ))}
+
+          <button
+            type="button"
+            onClick={() => setRequiredIngredients((prev) => [...prev, ""])}
+            className="w-full rounded-2xl border border-neutral-200 py-4 font-bold"
+          >
+            추가하기
+          </button>
         </section>
 
-        <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold">선택 재료</h2>
-            <button
-              type="button"
-              onClick={() => addListItem(setOptionalIngredients)}
-              className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white"
-            >
-              추가하기
-            </button>
-          </div>
+        <section className="space-y-3 rounded-3xl bg-white p-5 shadow-sm">
+          <h2 className="text-xl font-bold">선택 재료</h2>
 
           {optionalIngredients.map((item, index) => (
             <div key={index} className="flex gap-2">
-              <input
+              <select
                 value={item}
                 onChange={(e) =>
                   updateListItem(setOptionalIngredients, index, e.target.value)
                 }
-                placeholder={`선택 재료 ${index + 1}`}
                 className="w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
-              />
+              >
+                <option value="">재료를 선택하세요</option>
+                {ingredients.map((ingredient) => (
+                  <option key={ingredient.id} value={ingredient.name}>
+                    {ingredient.name}
+                  </option>
+                ))}
+              </select>
+
               <button
                 type="button"
                 onClick={() => removeListItem(setOptionalIngredients, index)}
-                className="rounded-2xl border px-4 text-sm font-semibold"
+                className="rounded-2xl border border-neutral-200 px-4"
               >
                 삭제
               </button>
             </div>
           ))}
+
+          <button
+            type="button"
+            onClick={() => setOptionalIngredients((prev) => [...prev, ""])}
+            className="w-full rounded-2xl border border-neutral-200 py-4 font-bold"
+          >
+            추가하기
+          </button>
         </section>
 
-        <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold">만드는 방법</h2>
-            <button
-              type="button"
-              onClick={() => addListItem(setSteps)}
-              className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white"
-            >
-              추가하기
-            </button>
-          </div>
+        <section className="space-y-3 rounded-3xl bg-white p-5 shadow-sm">
+          <h2 className="text-xl font-bold">만드는 법</h2>
 
           {steps.map((item, index) => (
-            <div key={index} className="space-y-2">
-              <label className="text-sm font-semibold">{index + 1}. 단계</label>
+            <div key={index} className="flex gap-2">
               <textarea
                 value={item}
                 onChange={(e) => updateListItem(setSteps, index, e.target.value)}
-                placeholder={`${index + 1}. 내용을 입력하세요`}
-                className="min-h-[100px] w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
+                placeholder={`단계 ${index + 1}`}
+                className="h-24 w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
               />
+
+              <button
+                type="button"
+                onClick={() => removeListItem(setSteps, index)}
+                className="rounded-2xl border border-neutral-200 px-4"
+              >
+                삭제
+              </button>
             </div>
           ))}
+
+          <button
+            type="button"
+            onClick={() => setSteps((prev) => [...prev, ""])}
+            className="w-full rounded-2xl border border-neutral-200 py-4 font-bold"
+          >
+            추가하기
+          </button>
         </section>
 
-        <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold">구매 연결 재료</h2>
-            <button
-              type="button"
-              onClick={addPurchaseLink}
-              className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white"
-            >
-              추가하기
-            </button>
-          </div>
+        <section className="space-y-3 rounded-3xl bg-white p-5 shadow-sm">
+          <h2 className="text-xl font-bold">구매 연결 재료</h2>
 
           {purchaseLinks.map((item, index) => (
-            <div key={index} className="space-y-3 rounded-2xl border p-4">
+            <div key={index} className="space-y-2 rounded-2xl border border-neutral-200 p-3">
               <select
                 value={item.ingredient}
                 onChange={(e) =>
-                  updatePurchaseLink(index, "ingredient", e.target.value)
+                  setPurchaseLinks((prev) =>
+                    prev.map((link, i) =>
+                      i === index ? { ...link, ingredient: e.target.value } : link
+                    )
+                  )
                 }
-                className="w-full rounded-2xl border px-4 py-4"
+                className="w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
               >
                 <option value="">재료를 선택하세요</option>
-                {allIngredientOptions.map((ingredient) => (
-                  <option key={ingredient} value={ingredient}>
-                    {ingredient}
+                {ingredients.map((ingredient) => (
+                  <option key={ingredient.id} value={ingredient.name}>
+                    {ingredient.name}
                   </option>
                 ))}
               </select>
 
               <input
                 value={item.url}
-                onChange={(e) => updatePurchaseLink(index, "url", e.target.value)}
+                onChange={(e) =>
+                  setPurchaseLinks((prev) =>
+                    prev.map((link, i) =>
+                      i === index ? { ...link, url: e.target.value } : link
+                    )
+                  )
+                }
                 placeholder="구매 링크"
-                className="w-full rounded-2xl border px-4 py-4"
+                className="w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
               />
 
               <button
                 type="button"
-                onClick={() => removePurchaseLink(index)}
-                className="w-full rounded-2xl border px-4 py-3 text-sm font-semibold"
+                onClick={() =>
+                  setPurchaseLinks((prev) => prev.filter((_, i) => i !== index))
+                }
+                className="w-full rounded-2xl border border-neutral-200 py-3 font-bold"
               >
                 이 구매 연결 삭제
               </button>
             </div>
           ))}
+
+          <button
+            type="button"
+            onClick={() =>
+              setPurchaseLinks((prev) => [...prev, { ingredient: "", url: "" }])
+            }
+            className="w-full rounded-2xl border border-neutral-200 py-4 font-bold"
+          >
+            추가하기
+          </button>
         </section>
 
-        <section className="space-y-4 rounded-3xl bg-white p-5 shadow-sm">
-          <div className="flex items-center justify-between">
-            <h2 className="text-xl font-semibold">참고 자료</h2>
-            <button
-              type="button"
-              onClick={() => addListItem(setReferences)}
-              className="rounded-xl bg-black px-4 py-2 text-sm font-semibold text-white"
-            >
-              추가하기
-            </button>
-          </div>
+        <section className="space-y-3 rounded-3xl bg-white p-5 shadow-sm">
+          <h2 className="text-xl font-bold">참고 자료</h2>
 
           {references.map((item, index) => (
             <div key={index} className="flex gap-2">
               <input
                 value={item}
-                onChange={(e) => updateListItem(setReferences, index, e.target.value)}
+                onChange={(e) =>
+                  updateListItem(setReferences, index, e.target.value)
+                }
                 placeholder={`참고 자료 링크 ${index + 1}`}
-                className="w-full rounded-2xl border px-4 py-4"
+                className="w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
               />
+
               <button
                 type="button"
                 onClick={() => removeListItem(setReferences, index)}
-                className="rounded-2xl border px-4 text-sm font-semibold"
+                className="rounded-2xl border border-neutral-200 px-4"
               >
                 삭제
               </button>
             </div>
           ))}
+
+          <button
+            type="button"
+            onClick={() => setReferences((prev) => [...prev, ""])}
+            className="w-full rounded-2xl border border-neutral-200 py-4 font-bold"
+          >
+            추가하기
+          </button>
         </section>
 
         <button
           type="button"
           onClick={handleSave}
-          className="w-full rounded-2xl bg-black px-4 py-5 text-2xl font-bold text-white"
+          className="w-full rounded-2xl bg-black px-5 py-5 text-xl font-bold text-white"
         >
           {editId ? "수정 완료" : "저장하기"}
         </button>
       </div>
     </main>
+  );
+}
+
+export default function WritePage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="min-h-screen bg-neutral-100 px-5 py-8">
+          <div className="mx-auto max-w-md">
+            <p>불러오는 중...</p>
+          </div>
+        </main>
+      }
+    >
+      <WriteContent />
+    </Suspense>
   );
 }
