@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 
@@ -103,6 +103,12 @@ function WriteContent() {
 
   const cleanPurchaseLinks = (list: PurchaseLink[]) =>
     list.filter((item) => item.ingredient.trim() && item.url.trim());
+
+  const allRecipeIngredients = useMemo(() => {
+    return Array.from(
+      new Set([...cleanList(requiredIngredients), ...cleanList(optionalIngredients)])
+    );
+  }, [requiredIngredients, optionalIngredients]);
 
   const saveNewIngredients = async (items: string[]) => {
     const cleaned = Array.from(new Set(cleanList(items)));
@@ -358,10 +364,14 @@ function WriteContent() {
 
           {steps.map((item, index) => (
             <div key={index} className="flex gap-2">
+              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-black font-bold text-white">
+                {index + 1}
+              </div>
+
               <textarea
                 value={item}
                 onChange={(e) => updateListItem(setSteps, index, e.target.value)}
-                placeholder={`단계 ${index + 1}`}
+                placeholder={`${index + 1}. 만드는 방법을 입력하세요`}
                 className="h-24 w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
               />
 
@@ -392,17 +402,24 @@ function WriteContent() {
               key={index}
               className="space-y-2 rounded-2xl border border-neutral-200 p-3"
             >
-              <IngredientInput
+              <select
                 value={item.ingredient}
-                onChange={(value) =>
+                onChange={(e) =>
                   setPurchaseLinks((prev) =>
                     prev.map((link, i) =>
-                      i === index ? { ...link, ingredient: value } : link
+                      i === index ? { ...link, ingredient: e.target.value } : link
                     )
                   )
                 }
-                placeholder="예: 오트밀"
-              />
+                className="w-full rounded-2xl border border-neutral-200 px-4 py-4 outline-none"
+              >
+                <option value="">연결할 재료를 선택하세요</option>
+                {allRecipeIngredients.map((ingredient) => (
+                  <option key={ingredient} value={ingredient}>
+                    {ingredient}
+                  </option>
+                ))}
+              </select>
 
               <input
                 value={item.url}
